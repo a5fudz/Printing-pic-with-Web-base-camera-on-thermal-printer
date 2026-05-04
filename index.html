@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS Camera Print</title>
+    <style>
+        video { width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px; background: #000; }
+        canvas { display: none; } /* Hanya untuk pengolahan data */
+        .container { text-align: center; padding: 20px; font-family: sans-serif; }
+        button { padding: 10px 20px; margin: 10px; cursor: pointer; font-weight: bold; }
+        .btn-print { background: green; color: white; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>Cetak Langsung dari Kamera</h3>
+    <div id="status">Status Printer: Terputus</div>
+    
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <br>
+    <button onclick="hubungkanPrinter()">1. Hubungkan Printer</button>
+    <button class="btn-print" onclick="ambilDanCetak()">2. Ambil Foto & Cetak</button>
+</div>
+
+<script>
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let printerChar;
+
+    // FUNGSI 1: MENGAKTIFKAN KAMERA (Otomatis saat halaman dibuka)
+    async function aktifkanKamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" }, // Pakai kamera belakang
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            console.error("Error Kamera: ", err);
+            alert("Kamera tidak terbuka. Pastikan Anda menggunakan HTTPS dan memberi izin kamera.");
+        }
+    }
+
+    // Jalankan kamera saat start
+    aktifkanKamera();
+
+    // FUNGSI 2: KONEKSI BLUETOOTH
+    async function hubungkanPrinter() {
+        try {
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }],
+                optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
+            });
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+            printerChar = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+            document.getElementById('status').innerText = "Status: Terhubung ke " + device.name;
+        } catch (err) {
+            alert("Koneksi Bluetooth Gagal: " + err);
+        }
+    }
+
+    // FUNGSI 3: AMBIL FRAME DARI VIDEO & KIRIM KE PRINTER
+    async function ambilDanCetak() {
+        if (!printerChar) return alert("Hubungkan printer dulu!");
+
+        const ctx = canvas.getContext('2d');
+        canvas.width = 384; // Lebar standar thermal 58mm
+        canvas.height = (video.videoHeight / video.videoWidth) * 384;
+        
+        // Gambar apa yang terlihat di video ke dalam canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Ambil data pixel
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imgData.data;
+
+        // Header Gambar (ESC/POS)
+        let xL = 48; // 384 / 8
+        let yL = canvas.height & 0xff;
+        let yH = (canvas.height >> 8) & 0xff;
+        await sendData(new Uint8Array([0x1B, 0x40])); // Reset printer
+        await sendData(new Uint8Array([0x1D, 0x76, 0x30, 0, xL, 0, yL, yH]));
+
+        // Proses bit (Hitam Putih)
+        let bitmap = new Uint8Array((canvas.width >> 3) * canvas.height);
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                let i = (y * canvas.width + x) * 4;
+                let luminance = (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
+                if (luminance < 128) {
+                    let byteIdx = (y * 48) + (x >> 3);
+                    bitmap[byteIdx] |= (0x80 >> (x % 8));
+                }
+            }
+        }
+
+        await sendData(bitmap);
+        await sendData(new Uint8Array([0x0A, 0x0A, 0x0A])); // Feed kertas
+        alert("Selesai!");
+    }
+
+    async function sendData(data) {
+        const CHUNK = 20;
+        for (let i = 0; i < data.length; i += CHUNK) {
+            await printerChar.writeValue(data.slice(i, i + CHUNK));
+            await new Promise(r => setTimeout(r, 10)); // Delay agar printer tidak macet
+        }
+    }
+</script>
+</body>
+</html>
