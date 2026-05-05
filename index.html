@@ -3,71 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS Camera - USB & Bluetooth</title>
+    <title>Allservice POS - Hybrid Camera Print</title>
     <style>
-        body { font-family: sans-serif; background: #f4f7f6; padding: 20px; display: flex; justify-content: center; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 450px; text-align: center; }
-        video { width: 100%; border-radius: 8px; background: #000; margin-bottom: 10px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px; text-align: center; }
+        
+        h2 { color: #1a73e8; margin-bottom: 10px; }
+        video { width: 100%; border-radius: 10px; background: #000; margin-bottom: 15px; box-shadow: inset 0 0 10px #000; }
         canvas { display: none; }
-        .status { margin: 10px 0; padding: 8px; border-radius: 5px; font-size: 13px; font-weight: bold; }
-        .off { background: #fee; color: #c33; }
-        .on { background: #efe; color: #282; }
-        .btn-group { display: flex; gap: 5px; flex-wrap: wrap; }
-        button { flex: 1; padding: 12px; margin: 5px 0; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        .btn-usb { background: #555; color: white; }
+        
+        .status { padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin-bottom: 20px; transition: 0.3s; }
+        .off { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .on { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+
+        .btn-group { display: flex; gap: 10px; margin-bottom: 10px; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        
+        .btn-usb { background: #37474f; color: white; }
         .btn-ble { background: #1a73e8; color: white; }
-        .btn-print { background: #28a745; color: white; width: 100%; font-size: 16px; margin-top: 10px; }
-        button:disabled { background: #ccc; opacity: 0.6; }
+        .btn-print { background: #2e7d32; color: white; width: 100%; font-size: 16px; margin-top: 5px; }
+        
+        button:active { transform: scale(0.98); }
+        button:disabled { background: #ccc; cursor: not-allowed; opacity: 0.7; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h3>Allservice POS Hybrid</h3>
+    <h2>Allservice POS</h2>
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
-    <div id="status" class="status off">Printer: Belum Terhubung</div>
+    
+    <div id="status" class="status off">Printer: Terputus</div>
 
     <div class="btn-group">
-        <button class="btn-usb" onclick="konekUSB()">Konek USB</button>
-        <button class="btn-ble" onclick="konekBluetooth()">Konek Bluetooth</button>
+        <button class="btn-usb" onclick="konekUSB()">1a. Konek USB (OTG)</button>
+        <button class="btn-ble" onclick="konekBluetooth()">1b. Konek Bluetooth</button>
     </div>
     
-    <button id="printBtn" class="btn-print" onclick="ambilDanCetak()" disabled>AMBIL FOTO & CETAK</button>
+    <button id="printBtn" class="btn-print" onclick="ambilDanCetak()" disabled>2. AMBIL FOTO & CETAK</button>
 </div>
 
 <script>
     let video = document.getElementById('video');
     let canvas = document.getElementById('canvas');
-    let printerDevice = null;
-    let mode = ""; // "usb" atau "ble"
+    let printBtn = document.getElementById('printBtn');
+    let statusDiv = document.getElementById('status');
 
-    // 1. AKTIFKAN KAMERA
+    // Variabel Koneksi
+    let mode = ""; // "usb" atau "ble"
+    let bleChar = null;
+    let printerDevice = null;
+    let usbEndpoint = null;
+    let usbInterface = null;
+
+    // --- 1. INISIALISASI KAMERA ---
     async function initKamera() {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        video.srcObject = stream;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" }, 
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            alert("Gagal akses kamera: " + err.message);
+        }
     }
     initKamera();
 
-    // 2. KONEKSI USB
+    // --- 2. KONEKSI USB (ANDROID OPTIMIZED) ---
     async function konekUSB() {
         try {
-            printerDevice = await navigator.usb.requestDevice({ filters: [] }); // Ambil semua device USB
+            printerDevice = await navigator.usb.requestDevice({ filters: [] });
             await printerDevice.open();
-            await printerDevice.selectConfiguration(1);
-            await printerDevice.claimInterface(0); 
             
-            mode = "usb";
-            document.getElementById('status').innerText = "Terhubung: USB Printer";
-            document.getElementById('status').className = "status on";
-            document.getElementById('printBtn').disabled = false;
+            if (printerDevice.configuration === null) {
+                await printerDevice.selectConfiguration(1);
+            }
+
+            // Cari Interface & Endpoint Otomatis
+            const interfaces = printerDevice.configuration.interfaces;
+            for (const iface of interfaces) {
+                const alternate = iface.alternates[0];
+                const outEndpoint = alternate.endpoints.find(e => e.direction === 'out');
+                if (outEndpoint) {
+                    usbInterface = iface.interfaceNumber;
+                    usbEndpoint = outEndpoint.endpointNumber;
+                    break;
+                }
+            }
+
+            if (usbInterface !== null) {
+                await printerDevice.claimInterface(usbInterface);
+                mode = "usb";
+                statusDiv.innerText = "Terhubung: USB (Interface " + usbInterface + ")";
+                statusDiv.className = "status on";
+                printBtn.disabled = false;
+            } else {
+                throw new Error("Printer tidak mendukung jalur data OUT.");
+            }
         } catch (err) {
-            alert("USB Error: " + err);
+            alert("Koneksi USB Gagal: " + err.message);
         }
     }
 
-    // 3. KONEKSI BLUETOOTH
-    let bleChar;
+    // --- 3. KONEKSI BLUETOOTH ---
     async function konekBluetooth() {
         try {
             const device = await navigator.bluetooth.requestDevice({
@@ -79,62 +119,76 @@
             bleChar = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
             
             mode = "ble";
-            document.getElementById('status').innerText = "Terhubung: BLE " + device.name;
-            document.getElementById('status').className = "status on";
-            document.getElementById('printBtn').disabled = false;
+            statusDiv.innerText = "Terhubung: Bluetooth (" + device.name + ")";
+            statusDiv.className = "status on";
+            printBtn.disabled = false;
         } catch (err) {
-            alert("BLE Error: " + err);
+            alert("Koneksi Bluetooth Gagal: " + err.message);
         }
     }
 
-    // 4. PROSES CETAK
+    // --- 4. PROSES CETAK ---
     async function ambilDanCetak() {
-        const ctx = canvas.getContext('2d');
-        canvas.width = 384; 
-        canvas.height = Math.floor((video.videoHeight / video.videoWidth) * 384);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        printBtn.disabled = true;
+        printBtn.innerText = "Mencetak...";
 
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const pixels = imgData.data;
-        let bitmap = new Uint8Array((canvas.width / 8) * canvas.height);
+        try {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            canvas.width = 384; 
+            canvas.height = Math.floor((video.videoHeight / video.videoWidth) * 384);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                let i = (y * canvas.width + x) * 4;
-                let brightness = (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
-                if (brightness < 128) {
-                    let byteIdx = (y * 48) + (x >> 3);
-                    bitmap[byteIdx] |= (0x80 >> (x % 8));
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imgData.data;
+            let bitmap = new Uint8Array((canvas.width / 8) * canvas.height);
+
+            // Konversi ke Hitam Putih (Thresholding)
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < canvas.width; x++) {
+                    let i = (y * canvas.width + x) * 4;
+                    let brightness = (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
+                    if (brightness < 128) {
+                        let byteIdx = (y * 48) + (x >> 3);
+                        bitmap[byteIdx] |= (0x80 >> (x % 8));
+                    }
                 }
             }
-        }
 
-        // Header ESC/POS (GS v 0)
-        const header = new Uint8Array([0x1B, 0x40, 0x1D, 0x76, 0x30, 0, 48, 0, canvas.height & 0xff, (canvas.height >> 8) & 0xff]);
-        const footer = new Uint8Array([0x1B, 0x64, 0x03]); // Feed 3 baris
-        
-        const combinedData = new Uint8Array(header.length + bitmap.length + footer.length);
-        combinedData.set(header);
-        combinedData.set(bitmap, header.length);
-        combinedData.set(footer, header.length + bitmap.length);
+            // Header ESC/POS
+            const header = new Uint8Array([
+                0x1B, 0x40, // Init
+                0x1D, 0x76, 0x30, 0, // Gambar Raster
+                48, 0, // xL, xH (48 * 8 = 384 dot)
+                canvas.height & 0xff, (canvas.height >> 8) & 0xff // yL, yH
+            ]);
+            const footer = new Uint8Array([0x1B, 0x64, 0x05, 0x1B, 0x40]); // Feed 5 baris & reset
 
-        if (mode === "usb") {
-            // KIRIM VIA USB (Sangat Cepat & Smooth)
-            // Biasanya endpoint out adalah 1 atau 2
-            try {
-                await printerDevice.transferOut(1, combinedData); 
-            } catch (e) {
-                // Jika endpoint 1 gagal, coba endpoint 2 atau 3
-                await printerDevice.transferOut(2, combinedData);
+            // Gabung data
+            const payload = new Uint8Array(header.length + bitmap.length + footer.length);
+            payload.set(header);
+            payload.set(bitmap, header.length);
+            payload.set(footer, header.length + bitmap.length);
+
+            if (mode === "usb") {
+                // --- PENGIRIMAN USB (SMOOTH) ---
+                await printerDevice.transferOut(usbEndpoint, payload);
+            } else {
+                // --- PENGIRIMAN BLUETOOTH (CHUNKED) ---
+                const CHUNK = 128;
+                for (let i = 0; i < payload.length; i += CHUNK) {
+                    await bleChar.writeValue(payload.slice(i, i + CHUNK));
+                    await new Promise(r => setTimeout(r, 15)); // Jeda agar Bluetooth stabil
+                }
             }
-        } else {
-            // KIRIM VIA BLUETOOTH (Tetap pakai chunking)
-            const CHUNK = 128;
-            for (let i = 0; i < combinedData.length; i += CHUNK) {
-                await bleChar.writeValue(combinedData.slice(i, i + CHUNK));
-            }
+            alert("Cetak Selesai!");
+        } catch (e) {
+            alert("Gagal Cetak: " + e.message);
+        } finally {
+            printBtn.disabled = false;
+            printBtn.innerText = "2. AMBIL FOTO & CETAK";
         }
     }
 </script>
+
 </body>
 </html>
