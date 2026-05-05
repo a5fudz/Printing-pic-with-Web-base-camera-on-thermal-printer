@@ -3,28 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Allservice POS - Hybrid Camera Print</title>
+    <title>Allservice POS - Hybrid Ultra</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px; text-align: center; }
+        .card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px; text-align: center; }
         
-        h2 { color: #1a73e8; margin-bottom: 10px; }
-        video { width: 100%; border-radius: 10px; background: #000; margin-bottom: 15px; box-shadow: inset 0 0 10px #000; }
+        h2 { color: #1a73e8; margin-top: 0; }
+        video { width: 100%; border-radius: 10px; background: #000; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
         canvas { display: none; }
         
-        .status { padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin-bottom: 20px; transition: 0.3s; }
-        .off { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
-        .on { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .status { padding: 12px; border-radius: 8px; font-size: 14px; font-weight: bold; margin-bottom: 20px; transition: 0.3s; border: 1px solid transparent; }
+        .off { background: #ffebee; color: #c62828; border-color: #ffcdd2; }
+        .on { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
 
         .btn-group { display: flex; gap: 10px; margin-bottom: 10px; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         
         .btn-usb { background: #37474f; color: white; }
         .btn-ble { background: #1a73e8; color: white; }
         .btn-print { background: #2e7d32; color: white; width: 100%; font-size: 16px; margin-top: 5px; }
         
-        button:active { transform: scale(0.98); }
-        button:disabled { background: #ccc; cursor: not-allowed; opacity: 0.7; }
+        button:active { transform: scale(0.96); box-shadow: none; }
+        button:disabled { background: #ccc; cursor: not-allowed; opacity: 0.7; transform: none; }
     </style>
 </head>
 <body>
@@ -45,13 +45,12 @@
 </div>
 
 <script>
-    let video = document.getElementById('video');
-    let canvas = document.getElementById('canvas');
-    let printBtn = document.getElementById('printBtn');
-    let statusDiv = document.getElementById('status');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const printBtn = document.getElementById('printBtn');
+    const statusDiv = document.getElementById('status');
 
-    // Variabel Koneksi
-    let mode = ""; // "usb" atau "ble"
+    let mode = ""; 
     let bleChar = null;
     let printerDevice = null;
     let usbEndpoint = null;
@@ -66,12 +65,12 @@
             });
             video.srcObject = stream;
         } catch (err) {
-            alert("Gagal akses kamera: " + err.message);
+            alert("Kamera Error: " + err.message);
         }
     }
     initKamera();
 
-    // --- 2. KONEKSI USB (ANDROID OPTIMIZED) ---
+    // --- 2. KONEKSI USB (DENGAN AUTO-DETECTION) ---
     async function konekUSB() {
         try {
             printerDevice = await navigator.usb.requestDevice({ filters: [] });
@@ -81,7 +80,6 @@
                 await printerDevice.selectConfiguration(1);
             }
 
-            // Cari Interface & Endpoint Otomatis
             const interfaces = printerDevice.configuration.interfaces;
             for (const iface of interfaces) {
                 const alternate = iface.alternates[0];
@@ -94,16 +92,16 @@
             }
 
             if (usbInterface !== null) {
-                await printerDevice.claimInterface(usbInterface);
+                // Jangan claim di sini dulu, kita claim saat mau cetak agar tidak terkunci
                 mode = "usb";
-                statusDiv.innerText = "Terhubung: USB (Interface " + usbInterface + ")";
+                statusDiv.innerText = "Terhubung: USB (Siap Cetak)";
                 statusDiv.className = "status on";
                 printBtn.disabled = false;
             } else {
-                throw new Error("Printer tidak mendukung jalur data OUT.");
+                throw new Error("Jalur data printer tidak ditemukan.");
             }
         } catch (err) {
-            alert("Koneksi USB Gagal: " + err.message);
+            alert("USB Error: " + err.message);
         }
     }
 
@@ -123,14 +121,14 @@
             statusDiv.className = "status on";
             printBtn.disabled = false;
         } catch (err) {
-            alert("Koneksi Bluetooth Gagal: " + err.message);
+            alert("Bluetooth Error: " + err.message);
         }
     }
 
     // --- 4. PROSES CETAK ---
     async function ambilDanCetak() {
         printBtn.disabled = true;
-        printBtn.innerText = "Mencetak...";
+        printBtn.innerText = "Proses...";
 
         try {
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -142,7 +140,6 @@
             const pixels = imgData.data;
             let bitmap = new Uint8Array((canvas.width / 8) * canvas.height);
 
-            // Konversi ke Hitam Putih (Thresholding)
             for (let y = 0; y < canvas.height; y++) {
                 for (let x = 0; x < canvas.width; x++) {
                     let i = (y * canvas.width + x) * 4;
@@ -154,41 +151,45 @@
                 }
             }
 
-            // Header ESC/POS
-            const header = new Uint8Array([
-                0x1B, 0x40, // Init
-                0x1D, 0x76, 0x30, 0, // Gambar Raster
-                48, 0, // xL, xH (48 * 8 = 384 dot)
-                canvas.height & 0xff, (canvas.height >> 8) & 0xff // yL, yH
-            ]);
-            const footer = new Uint8Array([0x1B, 0x64, 0x05, 0x1B, 0x40]); // Feed 5 baris & reset
+            // ESC/POS Payload
+            const header = new Uint8Array([0x1B, 0x40, 0x1D, 0x76, 0x30, 0, 48, 0, canvas.height & 0xff, (canvas.height >> 8) & 0xff]);
+            const footer = new Uint8Array([0x1B, 0x64, 0x05, 0x1B, 0x40]);
 
-            // Gabung data
             const payload = new Uint8Array(header.length + bitmap.length + footer.length);
             payload.set(header);
             payload.set(bitmap, header.length);
             payload.set(footer, header.length + bitmap.length);
 
             if (mode === "usb") {
-                // --- PENGIRIMAN USB (SMOOTH) ---
-                await printerDevice.transferOut(usbEndpoint, payload);
+                // --- USB RECOVERY LOGIC ---
+                try {
+                    await printerDevice.claimInterface(usbInterface);
+                    await printerDevice.transferOut(usbEndpoint, payload);
+                    await printerDevice.releaseInterface(usbInterface); // Lepas agar bisa dipakai lagi
+                } catch (usbErr) {
+                    // Jika gagal, coba reset koneksi satu kali secara otomatis
+                    await printerDevice.open();
+                    await printerDevice.selectConfiguration(1);
+                    await printerDevice.claimInterface(usbInterface);
+                    await printerDevice.transferOut(usbEndpoint, payload);
+                    await printerDevice.releaseInterface(usbInterface);
+                }
             } else {
-                // --- PENGIRIMAN BLUETOOTH (CHUNKED) ---
+                // --- BLUETOOTH CHUNKING ---
                 const CHUNK = 128;
                 for (let i = 0; i < payload.length; i += CHUNK) {
                     await bleChar.writeValue(payload.slice(i, i + CHUNK));
-                    await new Promise(r => setTimeout(r, 15)); // Jeda agar Bluetooth stabil
+                    await new Promise(r => setTimeout(r, 15));
                 }
             }
-            alert("Cetak Selesai!");
+            console.log("Cetak Berhasil");
         } catch (e) {
-            alert("Gagal Cetak: " + e.message);
+            alert("Gagal: " + e.message);
         } finally {
             printBtn.disabled = false;
             printBtn.innerText = "2. AMBIL FOTO & CETAK";
         }
     }
 </script>
-
 </body>
 </html>
