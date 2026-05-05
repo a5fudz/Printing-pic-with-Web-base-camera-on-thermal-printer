@@ -3,103 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Allservice POS - Bluetooth Optimized</title>
+    <title>POS Camera Print - Smooth</title>
     <style>
-        body { font-family: sans-serif; background-color: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
-        h2 { text-align: center; color: #1a73e8; }
-        .status { padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 15px; font-weight: bold; }
+        body { font-family: sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+        video { width: 100%; border-radius: 8px; background: #000; transform: scaleX(-1); /* Mirror view */ }
+        canvas { display: none; }
+        .status { margin: 15px 0; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 14px; }
         .off { background: #ffebee; color: #c62828; }
         .on { background: #e8f5e9; color: #2e7d32; }
-        button { width: 100%; padding: 12px; margin: 5px 0; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button { width: 100%; padding: 12px; margin: 8px 0; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold; }
         .btn-connect { background: #1a73e8; color: white; }
         .btn-print { background: #34a853; color: white; }
-        button:disabled { background: #ccc; }
-        textarea { width: 100%; height: 120px; margin: 10px 0; box-sizing: border-box; font-family: monospace; padding: 10px; border: 1px solid #ccc; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h2>Allservice POS</h2>
+    <h3>Allservice Camera POS</h3>
     <div id="status" class="status off">Printer: Terputus</div>
     
-    <button id="connectBtn" class="btn-connect">1. Cari Printer Bluetooth</button>
-    
-    <textarea id="content">
-ALLSERVICE POS
---------------------------------
-Item 1          Rp 15.000
-Item 2          Rp 10.000
---------------------------------
-TOTAL           Rp 25.000
-    </textarea>
-    
-    <button id="printBtn" class="btn-print" disabled>2. Cetak Struk</button>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <button onclick="hubungkanPrinter()" class="btn-connect">1. Hubungkan Printer</button>
+    <button id="printBtn" class="btn-print" onclick="ambilDanCetak()" disabled>2. Ambil Foto & Cetak</button>
 </div>
 
 <script>
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
     let printerChar;
 
-    document.getElementById('connectBtn').addEventListener('click', async () => {
+    async function aktifkanKamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" },
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            alert("Gagal akses kamera. Gunakan HTTPS.");
+        }
+    }
+
+    aktifkanKamera();
+
+    async function hubungkanPrinter() {
         try {
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }],
                 optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
             });
-
             const server = await device.gatt.connect();
             const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
             printerChar = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
-
-            document.getElementById('status').innerText = "Printer: " + device.name;
+            
+            document.getElementById('status').innerText = "Terhubung: " + device.name;
             document.getElementById('status').className = "status on";
             document.getElementById('printBtn').disabled = false;
         } catch (err) {
-            alert("Gagal konek: " + err);
+            alert("Koneksi Gagal: " + err);
         }
-    });
+    }
 
-    document.getElementById('printBtn').addEventListener('click', async () => {
+    async function ambilDanCetak() {
         if (!printerChar) return;
+        const btn = document.getElementById('printBtn');
+        btn.disabled = true;
+        btn.innerText = "Sedang Mencetak...";
 
-        const printBtn = document.getElementById('printBtn');
-        printBtn.disabled = true; // Kunci tombol saat mencetak
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         
-        const encoder = new TextEncoder();
-        // Gabungkan perintah Inisialisasi (ESC @) dengan teks
-        const initCommand = new Uint8Array([0x1B, 0x40]);
-        const textData = encoder.encode(document.getElementById('content').value + "\n\n\n\n");
+        // Lebar standar 58mm adalah 384 pixel
+        canvas.width = 384; 
+        canvas.height = Math.floor((video.videoHeight / video.videoWidth) * 384);
         
-        // Gabungkan semua data menjadi satu array buffer
-        const fullData = new Uint8Array(initCommand.length + textData.length);
-        fullData.set(initCommand);
-        fullData.set(textData, initCommand.length);
+        // Ambil gambar dan konversi ke Grayscale sederhana di canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imgData.data;
+
+        // Persiapkan Buffer Bitmap (1 bit per pixel)
+        let bitmap = new Uint8Array((canvas.width / 8) * canvas.height);
+        
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                let i = (y * canvas.width + x) * 4;
+                // Thresholding sederhana (Dithering lebih baik, tapi ini yang tercepat)
+                let brightness = (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
+                if (brightness < 128) {
+                    let byteIdx = (y * (canvas.width / 8)) + (x >> 3);
+                    bitmap[byteIdx] |= (0x80 >> (x % 8));
+                }
+            }
+        }
 
         try {
-            // Menaikkan CHUNK_SIZE agar printer tidak menunggu data terlalu sering
-            // Kebanyakan printer modern bisa menangani 128-512 bytes
-            const CHUNK_SIZE = 128; 
+            // 1. Inisialisasi Printer
+            await printerChar.writeValue(new Uint8Array([0x1B, 0x40])); 
             
-            for (let i = 0; i < fullData.length; i += CHUNK_SIZE) {
-                const chunk = fullData.slice(i, i + CHUNK_SIZE);
-                
-                // Gunakan writeValueWithoutResponse jika didukung untuk kecepatan maksimal
-                if (printerChar.writeValueWithoutResponse) {
-                    await printerChar.writeValueWithoutResponse(chunk);
-                } else {
-                    await printerChar.writeValue(chunk);
-                }
-                
-                // Beri jeda sangat kecil (10ms) agar buffer printer tidak meluap
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-        } catch (err) {
-            alert("Gagal cetak: " + err);
+            // 2. Header Gambar (GS v 0)
+            let xL = (canvas.width / 8) & 0xff;
+            let xH = ((canvas.width / 8) >> 8) & 0xff;
+            let yL = canvas.height & 0xff;
+            let yH = (canvas.height >> 8) & 0xff;
+            const header = new Uint8Array([0x1D, 0x76, 0x30, 0, xL, xH, yL, yH]);
+            await printerChar.writeValue(header);
+
+            // 3. Kirim Bitmap dengan Chunk lebih besar (Optimasi di sini)
+            await sendDataOptimized(bitmap);
+
+            // 4. Paper Feed
+            await printerChar.writeValue(new Uint8Array([0x1B, 0x64, 0x03])); 
+        } catch (e) {
+            alert("Error: " + e);
         } finally {
-            printBtn.disabled = false;
+            btn.disabled = false;
+            btn.innerText = "2. Ambil Foto & Cetak";
         }
-    });
+    }
+
+    async function sendDataOptimized(data) {
+        // Gunakan 128 atau 512 bytes per paket, bukan 20!
+        // Ini kunci agar pergerakan roller printer mengalir lancar.
+        const CHUNK_SIZE = 128; 
+        
+        for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+            const chunk = data.slice(i, i + CHUNK_SIZE);
+            
+            // Gunakan writeValueWithoutResponse jika browser mendukung (Chrome baru)
+            // Jika tidak, tetap gunakan writeValue tapi dengan chunk besar
+            if (printerChar.writeValueWithoutResponse) {
+                await printerChar.writeValueWithoutResponse(chunk);
+            } else {
+                await printerChar.writeValue(chunk);
+            }
+            
+            // Jeda sangat tipis agar buffer printer tidak meluap (overflow)
+            // 5-10ms sudah cukup untuk paket besar
+            await new Promise(r => setTimeout(r, 10)); 
+        }
+    }
 </script>
 </body>
 </html>
